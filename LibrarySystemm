@@ -1,0 +1,1459 @@
+package com.mycompany.librarysystemm;
+
+import java.util.ArrayList;
+import java.util.Scanner;
+import java.sql.*;
+import java.time.LocalTime;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+
+public class LibrarySystemm {
+
+    static Scanner scanner = new Scanner(System.in);
+    static Connection conn;
+
+    static ArrayList<User> users = new ArrayList<>();
+    static ArrayList<Book> books = new ArrayList<>();
+    static ArrayList<Book> borrowedBooks = new ArrayList<>();
+    static ArrayList<Reservation> reservations = new ArrayList<>();
+
+    static int currentUser = -1;
+    static int currentUserId = -1;
+    static int totalTransactions = 0;
+
+    static class User {
+        int id;
+        String category, name, idNumber, programYear, email, password;
+        int age;
+
+        User(int id, String category, String name, String idNumber,
+             int age, String programYear, String email, String password) {
+            this.id = id;
+            this.category = category;
+            this.name = name;
+            this.idNumber = idNumber;
+            this.age = age;
+            this.programYear = programYear;
+            this.email = email;
+            this.password = password;
+        }
+    }
+
+    static class Book {
+        int id;
+        String title, category, author;
+        boolean available;
+
+        Book(int id, String title, String category,
+             String author, boolean available) {
+            this.id = id;
+            this.title = title;
+            this.category = category;
+            this.author = author;
+            this.available = available;
+        }
+    }
+
+    static class Reservation {
+        int id;
+        Book book;
+        String date, time, status;
+        int userId;
+
+        Reservation(int id, Book book, String date,
+                    String time, String status, int userId) {
+            this.id = id;
+            this.book = book;
+            this.date = date;
+            this.time = time;
+            this.status = status;
+            this.userId = userId;
+        }
+    }
+
+    public static void main(String[] args) {
+
+        conn = connectDB();
+
+        if (conn == null) {
+            System.out.println("Unable to start PUP AcadLib.");
+            return;
+        }
+
+        initializeBooks();
+
+        System.out.println("________________________________________________");
+        System.out.println("             PUP ACADLIB LIBRARY SYSTEM");
+        System.out.println("        Polytechnic University of the Philippines");
+        System.out.println("________________________________________________");
+
+        firstMenu();
+
+        System.out.println("\nThank you for using PUP AcadLib!");
+
+        try {
+            conn.close();
+            System.out.println("Database connection closed.");
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+
+        scanner.close();
+    }
+
+    // DATABASE CONNECTION
+
+    static Connection connectDB() {
+
+        String url = "jdbc:mysql://localhost:3306/LibrarySystemm";
+        String username = "root";
+        String password = System.getenv("ACADLIB_DB_PASSWORD");
+
+        if (password == null || password.isEmpty()) {
+            System.out.println("Database password environment variable is missing.");
+            System.out.println("Set ACADLIB_DB_PASSWORD in Windows first.");
+            return null;
+        }
+
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            Connection connection =
+                DriverManager.getConnection(url, username, password);
+
+            System.out.println("\nDatabase connected successfully!");
+            return connection;
+
+        } catch (ClassNotFoundException e) {
+            System.out.println("MySQL JDBC Driver not found.");
+            System.out.println("Check your MySQL Connector/J library.");
+
+        } catch (SQLException e) {
+            System.out.println("Database connection failed!");
+            System.out.println(e.getMessage());
+        }
+
+        return null;
+    }
+
+    // INITIALIZE BOOKS
+
+    static void initializeBooks() {
+
+        String sql = "INSERT IGNORE INTO Books "
+                   + "(book_id, title, category, author, available) "
+                   + "VALUES (?, ?, ?, ?, TRUE)";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            addInitialBook(ps, 1, "Database Management Systems",
+                    "Scholarly", "Raghu Ramakrishnan");
+
+            addInitialBook(ps, 2, "Introduction to Java Programming",
+                    "Scholarly", "Y. Daniel Liang");
+
+            addInitialBook(ps, 3, "Computer Networks",
+                    "Scholarly", "Andrew S. Tanenbaum");
+
+            addInitialBook(ps, 4, "Research Methods in Information Technology",
+                    "Research", "John W. Creswell");
+
+            addInitialBook(ps, 5, "Fundamentals of Academic Research",
+                    "Research", "Wayne C. Booth");
+
+            addInitialBook(ps, 6, "Research Design",
+                    "Research", "John W. Creswell");
+
+            addInitialBook(ps, 7, "Web Development Fundamentals",
+                    "Capstone", "John Smith");
+
+            addInitialBook(ps, 8, "Software Engineering Project",
+                    "Capstone", "Ian Sommerville");
+
+            addInitialBook(ps, 9, "System Analysis and Design",
+                    "Capstone", "Kenneth E. Kendall");
+
+        } catch (SQLException e) {
+            System.out.println("Could not initialize books: " + e.getMessage());
+        }
+    }
+
+    static void addInitialBook(PreparedStatement ps, int id,
+                               String title, String category, String author)
+                               throws SQLException {
+        ps.setInt(1, id);
+        ps.setString(2, title);
+        ps.setString(3, category);
+        ps.setString(4, author);
+        ps.executeUpdate();
+    }
+
+    // LOAD DATABASE INFORMATION
+
+    static void loadUsers() {
+
+        users.clear();
+
+        String sql = "SELECT * FROM Users";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                users.add(new User(
+                    rs.getInt("user_id"),
+                    rs.getString("category"),
+                    rs.getString("name"),
+                    rs.getString("id_number"),
+                    rs.getInt("age"),
+                    rs.getString("program_year"),
+                    rs.getString("email"),
+                    rs.getString("password")
+                ));
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Error loading users: " + e.getMessage());
+        }
+    }
+
+    static void loadBooks() {
+
+        books.clear();
+
+        String sql = "SELECT * FROM Books";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                books.add(new Book(
+                    rs.getInt("book_id"),
+                    rs.getString("title"),
+                    rs.getString("category"),
+                    rs.getString("author"),
+                    rs.getBoolean("available")
+                ));
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Error loading books: " + e.getMessage());
+        }
+    }
+
+    static void loadBorrowedBooks() {
+
+        borrowedBooks.clear();
+
+        String sql = "SELECT b.* FROM Books b "
+                   + "JOIN BorrowingRecords br ON b.book_id = br.book_id "
+                   + "WHERE br.user_id = ? AND br.status = 'Borrowed'";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, currentUserId);
+
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                borrowedBooks.add(new Book(
+                    rs.getInt("book_id"),
+                    rs.getString("title"),
+                    rs.getString("category"),
+                    rs.getString("author"),
+                    rs.getBoolean("available")
+                ));
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Error loading borrowed books: " + e.getMessage());
+        }
+    }
+
+    static void loadReservations() {
+
+        reservations.clear();
+
+        String sql = "SELECT r.*, b.title, b.category, b.author, b.available "
+                   + "FROM Reservations r "
+                   + "JOIN Books b ON r.book_id = b.book_id";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+
+                Book book = new Book(
+                    rs.getInt("book_id"),
+                    rs.getString("title"),
+                    rs.getString("category"),
+                    rs.getString("author"),
+                    rs.getBoolean("available")
+                );
+
+                reservations.add(new Reservation(
+                    rs.getInt("reservation_id"),
+                    book,
+                    rs.getString("reservation_date"),
+                    rs.getString("reservation_time"),
+                    rs.getString("status"),
+                    rs.getInt("user_id")
+                ));
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Error loading reservations: " + e.getMessage());
+        }
+    }
+
+    static void refreshData() {
+        loadUsers();
+        loadBooks();
+        loadBorrowedBooks();
+        loadReservations();
+    }
+
+    // FIRST MENU
+
+    static void firstMenu() {
+
+        int choice;
+
+        do {
+            System.out.println("\n1. Sign In");
+            System.out.println("2. Register");
+            System.out.println("3. Exit");
+            System.out.println("__________________________");
+
+            choice = getInteger("Enter your choice: ");
+
+            switch (choice) {
+                case 1:
+                    if (login()) {
+                        mainMenu();
+                    }
+                    break;
+
+                case 2:
+                    register();
+                    break;
+
+                case 3:
+                    System.out.println("\nExiting system...");
+                    break;
+
+                default:
+                    System.out.println("\nInvalid choice. Please try again.");
+            }
+
+        } while (choice != 3);
+    }
+
+    // LOGIN
+
+    static boolean login() {
+
+        int attempts = 3;
+
+        while (attempts > 0) {
+
+            System.out.println("\n--------------- SIGN-IN ---------------");
+
+            System.out.print("Email: ");
+            String enteredEmail = scanner.nextLine();
+
+            System.out.print("Password: ");
+            String enteredPassword = scanner.nextLine();
+
+            System.out.print("Account Type (student or admin): ");
+            String enteredAccountType = scanner.nextLine().toLowerCase();
+
+            String sql = "SELECT * FROM Users "
+                       + "WHERE email = ? AND password = ? AND category = ?";
+
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+                ps.setString(1, enteredEmail);
+                ps.setString(2, enteredPassword);
+                ps.setString(3, enteredAccountType);
+
+                ResultSet rs = ps.executeQuery();
+
+                if (rs.next()) {
+
+                    currentUserId = rs.getInt("user_id");
+
+                    refreshData();
+
+                    for (int i = 0; i < users.size(); i++) {
+                        if (users.get(i).id == currentUserId) {
+                            currentUser = i;
+                            break;
+                        }
+                    }
+
+                    recordUserActivity("Signed in");
+
+                    System.out.println("\nLogin successful!");
+                    System.out.println("Welcome, " + users.get(currentUser).name + "!");
+                    System.out.println("Account Type: " + users.get(currentUser).category);
+                    System.out.println("________________________________________________");
+
+                    return true;
+                }
+
+            } catch (SQLException e) {
+                System.out.println("Login error: " + e.getMessage());
+                return false;
+            }
+
+            attempts--;
+
+            if (attempts > 0) {
+                System.out.println("\nIncorrect Email, Password, or Account Type.");
+                System.out.println("Attempts remaining: " + attempts);
+            } else {
+                System.out.println("\nToo many failed login attempts.");
+                System.out.println("Access denied.");
+            }
+        }
+
+        return false;
+    }
+
+    // REGISTRATION
+
+    static void register() {
+
+        System.out.println("\n--------------- REGISTER ---------------");
+
+        System.out.print("Account Type (student or admin): ");
+        String category = scanner.nextLine().toLowerCase();
+
+        while (!category.equals("student") && !category.equals("admin")) {
+            System.out.println("Please enter only student or admin.");
+            System.out.print("Account Type (student or admin): ");
+            category = scanner.nextLine().toLowerCase();
+        }
+
+        System.out.print("Name: ");
+        String name = scanner.nextLine();
+
+        System.out.print("ID Number: ");
+        String idNumber = scanner.nextLine();
+
+        int age = getInteger("Age: ");
+
+        System.out.print("Program and year: ");
+        String programYear = scanner.nextLine();
+
+        System.out.print("Email: ");
+        String email = scanner.nextLine();
+
+        while (emailExists(email)) {
+            System.out.println("Email already registered.");
+            System.out.print("Email: ");
+            email = scanner.nextLine();
+        }
+
+        System.out.print("Password: ");
+        String password = scanner.nextLine();
+
+        String sql = "INSERT INTO Users "
+                   + "(category, name, id_number, age, program_year, email, password) "
+                   + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(
+                sql, Statement.RETURN_GENERATED_KEYS)) {
+
+            ps.setString(1, category);
+            ps.setString(2, name);
+            ps.setString(3, idNumber);
+            ps.setInt(4, age);
+            ps.setString(5, programYear);
+            ps.setString(6, email);
+            ps.setString(7, password);
+
+            ps.executeUpdate();
+
+            ResultSet keys = ps.getGeneratedKeys();
+
+            if (keys.next()) {
+                int newUserId = keys.getInt(1);
+
+                String cardNumber = "LIB-" + newUserId + "-" + idNumber;
+
+                String cardSQL = "INSERT INTO LibraryCards "
+                               + "(user_id, card_number) VALUES (?, ?)";
+
+                try (PreparedStatement cardPS = conn.prepareStatement(cardSQL)) {
+                    cardPS.setInt(1, newUserId);
+                    cardPS.setString(2, cardNumber);
+                    cardPS.executeUpdate();
+                }
+
+                currentUserId = newUserId;
+                recordUserActivity("Registered an account");
+                currentUserId = -1;
+            }
+
+            System.out.println("\nRegistration successful!");
+            System.out.println("You can now sign in using your email and password.");
+
+        } catch (SQLException e) {
+            System.out.println("Registration failed: " + e.getMessage());
+        }
+    }
+
+    static boolean emailExists(String email) {
+
+        String sql = "SELECT user_id FROM Users WHERE email = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, email);
+
+            ResultSet rs = ps.executeQuery();
+            return rs.next();
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+            return true;
+        }
+    }
+
+    // MAIN MENUS
+
+    static void mainMenu() {
+
+        User user = users.get(currentUser);
+
+        if (user.category.equalsIgnoreCase("admin")) {
+            adminMenu();
+        } else {
+            studentMenu();
+        }
+    }
+
+    static void studentMenu() {
+
+        int choice;
+
+        do {
+            User user = users.get(currentUser);
+
+            System.out.println("\n============================================");
+            System.out.println("                PUP ACADLIB");
+            System.out.println("             Welcome, " + user.name);
+            System.out.println("             Account: STUDENT");
+            System.out.println("============================================");
+
+            System.out.println("\nSTUDENT HOMEPAGE");
+            System.out.println("1. Library Guidelines");
+            System.out.println("2. Categories");
+            System.out.println("3. My Library Records");
+            System.out.println("4. Transactions");
+            System.out.println("5. Virtual Library Card");
+            System.out.println("6. Log Out");
+
+            choice = getInteger("Enter your choice: ");
+
+            switch (choice) {
+                case 1:
+                    libraryGuidelines();
+                    break;
+                case 2:
+                    categories();
+                    break;
+                case 3:
+                    showRecords();
+                    break;
+                case 4:
+                    transactions();
+                    break;
+                case 5:
+                    showLibraryCard();
+                    break;
+                case 6:
+                    System.out.println("\nLogging out...");
+                    currentUser = -1;
+                    currentUserId = -1;
+                    break;
+                default:
+                    System.out.println("\nInvalid choice. Please try again.");
+            }
+
+        } while (choice != 6);
+    }
+
+    static void adminMenu() {
+
+        int choice;
+
+        do {
+            User user = users.get(currentUser);
+
+            System.out.println("\n============================================");
+            System.out.println("             PUP ACADLIB - ADMIN");
+            System.out.println("             Welcome, " + user.name);
+            System.out.println("============================================");
+
+            System.out.println("\nADMIN DASHBOARD");
+            System.out.println("1. Library Guidelines");
+            System.out.println("2. View All Books");
+            System.out.println("3. Edit Book Information");
+            System.out.println("4. Remove a Book");
+            System.out.println("5. Check User Logs");
+            System.out.println("6. Virtual Library Card");
+            System.out.println("7. Log Out");
+
+            choice = getInteger("Enter your choice: ");
+
+            switch (choice) {
+                case 1:
+                    libraryGuidelines();
+                    break;
+                case 2:
+                    displayBooks();
+                    break;
+                case 3:
+                    editBook();
+                    break;
+                case 4:
+                    removeBook();
+                    break;
+                case 5:
+                    checkUserLogs();
+                    break;
+                case 6:
+                    showLibraryCard();
+                    break;
+                case 7:
+                    System.out.println("\nLogging out...");
+                    currentUser = -1;
+                    currentUserId = -1;
+                    break;
+                default:
+                    System.out.println("\nInvalid choice. Please try again.");
+            }
+
+        } while (choice != 7);
+    }
+
+    // BOOK DISPLAY AND MANAGEMENT
+
+    static void displayBooks() {
+
+        loadBooks();
+
+        System.out.println("\n--------------- LIBRARY BOOKS ---------------");
+
+        if (books.isEmpty()) {
+            System.out.println("There are no books in the library.");
+            return;
+        }
+
+        for (Book book : books) {
+            System.out.println("\nBook ID: " + book.id);
+            System.out.println("Title: " + book.title);
+            System.out.println("Category: " + book.category);
+            System.out.println("Author: " + book.author);
+            System.out.println("Status: " + getBookStatus(book));
+        }
+    }
+
+    static void editBook() {
+
+        displayBooks();
+
+        int id = getInteger("\nEnter Book ID to edit or 0 to go back: ");
+
+        if (id == 0) return;
+
+        Book book = findBook(id);
+
+        if (book == null) {
+            System.out.println("Book not found.");
+            return;
+        }
+
+        System.out.println("\nLeave a field blank to keep its current information.");
+
+        System.out.println("Current title: " + book.title);
+        System.out.print("New title: ");
+        String title = scanner.nextLine();
+
+        System.out.println("Current author: " + book.author);
+        System.out.print("New author: ");
+        String author = scanner.nextLine();
+
+        System.out.println("Current category: " + book.category);
+        System.out.print("New category (Scholarly, Research, Capstone): ");
+        String category = scanner.nextLine().trim();
+
+        if (!category.isEmpty()
+                && !category.equalsIgnoreCase("Scholarly")
+                && !category.equalsIgnoreCase("Research")
+                && !category.equalsIgnoreCase("Capstone")) {
+            System.out.println("Invalid category.");
+            return;
+        }
+
+        String sql = "UPDATE Books SET title = ?, author = ?, category = ? "
+                   + "WHERE book_id = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, title.trim().isEmpty() ? book.title : title);
+            ps.setString(2, author.trim().isEmpty() ? book.author : author);
+            ps.setString(3, category.trim().isEmpty() ? book.category : category);
+            ps.setInt(4, id);
+
+            ps.executeUpdate();
+
+            recordUserActivity("Edited book ID " + id);
+            System.out.println("Book information updated successfully!");
+
+        } catch (SQLException e) {
+            System.out.println("Could not update book: " + e.getMessage());
+        }
+    }
+
+    static void removeBook() {
+
+        displayBooks();
+
+        int id = getInteger("\nEnter Book ID to remove or 0 to go back: ");
+
+        if (id == 0) return;
+
+        Book book = findBook(id);
+
+        if (book == null) {
+            System.out.println("Book not found.");
+            return;
+        }
+
+        if (!book.available || hasActiveReservation(book)) {
+            System.out.println("This book cannot be removed because it is borrowed or reserved.");
+            return;
+        }
+
+        System.out.print("Are you sure you want to remove this book? (yes/no): ");
+        String confirmation = scanner.nextLine();
+
+        if (!confirmation.equalsIgnoreCase("yes")) {
+            System.out.println("Book removal cancelled.");
+            return;
+        }
+
+        String sql = "DELETE FROM Books WHERE book_id = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, id);
+            ps.executeUpdate();
+
+            recordUserActivity("Removed book ID " + id);
+            System.out.println("Book removed successfully.");
+
+        } catch (SQLException e) {
+            System.out.println("Could not remove book: " + e.getMessage());
+        }
+    }
+
+    // USER LOGS
+
+    static void recordUserActivity(String activity) {
+
+        if (currentUserId <= 0) return;
+
+        String sql = "INSERT INTO UserLogs (user_id, activity) VALUES (?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, currentUserId);
+            ps.setString(2, activity);
+            ps.executeUpdate();
+
+        } catch (SQLException e) {
+            System.out.println("Could not save activity: " + e.getMessage());
+        }
+    }
+
+    static void checkUserLogs() {
+
+        System.out.println("\n--------------- USER ACTIVITY LOGS ---------------");
+
+        String sql = "SELECT u.name, u.id_number, u.category, "
+                   + "l.activity, l.activity_date "
+                   + "FROM UserLogs l JOIN Users u ON l.user_id = u.user_id "
+                   + "ORDER BY l.activity_date DESC";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            int count = 0;
+
+            while (rs.next()) {
+                count++;
+
+                System.out.println("\n" + count + ". " + rs.getString("activity_date"));
+                System.out.println("User: " + rs.getString("name"));
+                System.out.println("ID: " + rs.getString("id_number"));
+                System.out.println("Account: " + rs.getString("category"));
+                System.out.println("Activity: " + rs.getString("activity"));
+            }
+
+            if (count == 0) {
+                System.out.println("No user activities have been recorded yet.");
+            }
+
+            System.out.println("\nTotal recorded activities: " + count);
+
+        } catch (SQLException e) {
+            System.out.println("Could not load logs: " + e.getMessage());
+        }
+    }
+
+    // CATEGORIES
+
+    static void categories() {
+
+        int choice;
+
+        do {
+            System.out.println("\n--------------- CATEGORIES ---------------");
+            System.out.println("1. Books");
+            System.out.println("2. Scholarly Works");
+            System.out.println("3. Capstone");
+            System.out.println("4. Back");
+
+            choice = getInteger("Enter your choice: ");
+
+            switch (choice) {
+                case 1:
+                    showAllBooks();
+                    break;
+                case 2:
+                    showScholarlyWorks();
+                    break;
+                case 3:
+                    showCapstoneBooks();
+                    break;
+                case 4:
+                    break;
+                default:
+                    System.out.println("\nInvalid choice.");
+            }
+
+        } while (choice != 4);
+    }
+
+    static void showAllBooks() {
+        loadBooks();
+        displayCategoryBooks("ALL");
+        selectBook();
+    }
+
+    static void showScholarlyWorks() {
+        loadBooks();
+        displayCategoryBooks("SCHOLARLY");
+        selectBook();
+    }
+
+    static void showCapstoneBooks() {
+        loadBooks();
+        displayCategoryBooks("CAPSTONE");
+        selectBook();
+    }
+
+    static void displayCategoryBooks(String type) {
+
+        System.out.println("\n--------------- " + type + " BOOKS ---------------");
+
+        for (Book book : books) {
+
+            if (type.equals("ALL")
+                    || (type.equals("SCHOLARLY")
+                    && (book.category.equalsIgnoreCase("Scholarly")
+                    || book.category.equalsIgnoreCase("Research")))
+                    || (type.equals("CAPSTONE")
+                    && book.category.equalsIgnoreCase("Capstone"))) {
+
+                System.out.println("\nBook ID: " + book.id);
+                System.out.println("Title: " + book.title);
+                System.out.println("Category: " + book.category);
+                System.out.println("Author: " + book.author);
+                System.out.println("Status: " + getBookStatus(book));
+            }
+        }
+    }
+
+    static String getBookStatus(Book book) {
+
+        if (!book.available) return "Borrowed";
+        if (hasActiveReservation(book)) return "Reserved";
+
+        return "Available";
+    }
+
+    static void selectBook() {
+
+        int id = getInteger("\nEnter Book ID to select a book or 0 to go back: ");
+
+        if (id == 0) return;
+
+        Book selectedBook = findBook(id);
+
+        if (selectedBook == null) {
+            System.out.println("\nBook not found.");
+            return;
+        }
+
+        bookOptions(selectedBook);
+    }
+
+    static void bookOptions(Book book) {
+
+        System.out.println("\n--------------- SELECTED BOOK ---------------");
+        System.out.println("Book ID: " + book.id);
+        System.out.println("Title: " + book.title);
+        System.out.println("Category: " + book.category);
+        System.out.println("Author: " + book.author);
+        System.out.println("Status: " + getBookStatus(book));
+
+        System.out.println("\n1. Borrow");
+        System.out.println("2. Reserve");
+        System.out.println("3. Back");
+
+        int choice = getInteger("Enter your choice: ");
+
+        switch (choice) {
+            case 1:
+                borrowSelectedBook(book);
+                break;
+            case 2:
+                reserveSelectedBook(book);
+                break;
+            case 3:
+                break;
+            default:
+                System.out.println("\nInvalid choice.");
+        }
+    }
+
+    // BORROW BOOK
+
+    static void borrowSelectedBook(Book book) {
+
+        if (!users.get(currentUser).category.equalsIgnoreCase("student")) {
+            System.out.println("Only student accounts can borrow books.");
+            return;
+        }
+
+        loadBorrowedBooks();
+        loadBooks();
+
+        if (borrowedBooks.size() >= 3) {
+            System.out.println("You have reached the maximum borrowing limit of 3 books.");
+            return;
+        }
+
+        book = findBook(book.id);
+
+        if (book == null || !book.available || hasActiveReservation(book)) {
+            System.out.println("This book is currently unavailable.");
+            return;
+        }
+
+        String updateSQL = "UPDATE Books SET available = FALSE "
+                         + "WHERE book_id = ? AND available = TRUE";
+
+        String insertSQL = "INSERT INTO BorrowingRecords "
+                         + "(user_id, book_id, status) VALUES (?, ?, 'Borrowed')";
+
+        try {
+            conn.setAutoCommit(false);
+
+            try (PreparedStatement updatePS = conn.prepareStatement(updateSQL);
+                 PreparedStatement insertPS = conn.prepareStatement(insertSQL)) {
+
+                updatePS.setInt(1, book.id);
+
+                if (updatePS.executeUpdate() == 0) {
+                    conn.rollback();
+                    System.out.println("This book is no longer available.");
+                    return;
+                }
+
+                insertPS.setInt(1, currentUserId);
+                insertPS.setInt(2, book.id);
+                insertPS.executeUpdate();
+
+                conn.commit();
+
+                recordUserActivity("Borrowed book: " + book.title);
+
+                loadBorrowedBooks();
+
+                System.out.println("\nBook borrowed successfully!");
+                System.out.println("Book: " + book.title);
+                System.out.println("Borrowed by: " + users.get(currentUser).name);
+                System.out.println("Books borrowed: " + borrowedBooks.size() + "/3");
+
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Borrowing failed: " + e.getMessage());
+
+            } finally {
+                conn.setAutoCommit(true);
+            }
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    // RESERVATIONS
+
+    static void reserveSelectedBook(Book book) {
+
+        loadBooks();
+        book = findBook(book.id);
+
+        if (book == null || !book.available) {
+            System.out.println("This book is unavailable.");
+            return;
+        }
+
+        if (hasActiveReservation(book)) {
+            System.out.println("This book is already reserved.");
+            return;
+        }
+
+        System.out.println("Reservation is only allowed until 5:00 PM.");
+
+        System.out.print("Enter reservation date (YYYY-MM-DD): ");
+        String date = scanner.nextLine();
+
+        LocalDate reservationDate;
+
+        try {
+            reservationDate = LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            System.out.println("Invalid date. Use YYYY-MM-DD.");
+            return;
+        }
+
+        if (reservationDate.isBefore(LocalDate.now())) {
+            System.out.println("You cannot reserve a book for a past date.");
+            return;
+        }
+
+        System.out.print("Enter reservation time (HH:MM AM/PM): ");
+        String time = scanner.nextLine();
+
+        LocalTime reservationTime = parseTime(time);
+
+        if (reservationTime == null) {
+            System.out.println("Invalid time format. Example: 4:30 PM.");
+            return;
+        }
+
+        if (reservationTime.isAfter(LocalTime.of(17, 0))) {
+            System.out.println("You can only reserve a book until 5:00 PM.");
+            return;
+        }
+
+        String sql = "INSERT INTO Reservations "
+                   + "(user_id, book_id, reservation_date, reservation_time, status) "
+                   + "VALUES (?, ?, ?, ?, 'Active')";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, currentUserId);
+            ps.setInt(2, book.id);
+            ps.setDate(3, Date.valueOf(reservationDate));
+            ps.setTime(4, Time.valueOf(reservationTime));
+            ps.executeUpdate();
+
+            recordUserActivity("Reserved book: " + book.title);
+
+            System.out.println("\nReservation successful!");
+            System.out.println("Book: " + book.title);
+            System.out.println("Date: " + date);
+            System.out.println("Time: " + time);
+            System.out.println("Status: Active");
+            System.out.println("Reservation deadline: 5:00 PM");
+
+        } catch (SQLException e) {
+            System.out.println("Reservation failed: " + e.getMessage());
+        }
+    }
+
+    static LocalTime parseTime(String time) {
+
+        DateTimeFormatter[] formats = {
+            DateTimeFormatter.ofPattern("h:mm a"),
+            DateTimeFormatter.ofPattern("hh:mm a"),
+            DateTimeFormatter.ofPattern("H:mm")
+        };
+
+        for (DateTimeFormatter format : formats) {
+            try {
+                return LocalTime.parse(time.toUpperCase(), format);
+            } catch (DateTimeParseException e) {
+                // Try the next time format.
+            }
+        }
+
+        return null;
+    }
+
+    static boolean hasActiveReservation(Book book) {
+
+        String sql = "SELECT reservation_id FROM Reservations "
+                   + "WHERE book_id = ? AND status = 'Active' "
+                   + "AND reservation_date >= CURDATE()";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, book.id);
+
+            ResultSet rs = ps.executeQuery();
+            return rs.next();
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+            return false;
+        }
+    }
+
+    // STUDENT RECORDS
+
+    static void showRecords() {
+
+        User user = users.get(currentUser);
+        loadBorrowedBooks();
+        loadReservations();
+
+        System.out.println("\n--------------- MY LIBRARY RECORDS ---------------");
+
+        System.out.println("Name: " + user.name);
+        System.out.println("ID Number: " + user.idNumber);
+        System.out.println("Age: " + user.age);
+        System.out.println("Program and Year: " + user.programYear);
+        System.out.println("Email: " + user.email);
+        System.out.println("Account Type: " + user.category);
+
+        System.out.println("\nBooks Borrowed: " + borrowedBooks.size());
+        System.out.println("Active Reservations: " + countUserReservations());
+        System.out.println("Overdue Books: 0");
+        System.out.println("Total Transactions: " + getTotalTransactions());
+
+        if (!borrowedBooks.isEmpty()) {
+            System.out.println("\nCurrent Borrowed Books:");
+
+            for (Book book : borrowedBooks) {
+                System.out.println("- " + book.title);
+            }
+        }
+
+        showReservations();
+    }
+
+    static int countUserReservations() {
+
+        String sql = "SELECT COUNT(*) FROM Reservations "
+                   + "WHERE user_id = ? AND status = 'Active'";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, currentUserId);
+
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) return rs.getInt(1);
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+
+        return 0;
+    }
+
+    static int getTotalTransactions() {
+
+        String sql = "SELECT COUNT(*) FROM BorrowingRecords WHERE user_id = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, currentUserId);
+
+            ResultSet rs = ps.executeQuery();
+
+            int borrowed = 0;
+
+            if (rs.next()) borrowed = rs.getInt(1);
+
+            String reservationSQL = "SELECT COUNT(*) FROM Reservations WHERE user_id = ?";
+
+            try (PreparedStatement reservationPS = conn.prepareStatement(reservationSQL)) {
+                reservationPS.setInt(1, currentUserId);
+
+                ResultSet reservationRS = reservationPS.executeQuery();
+
+                if (reservationRS.next()) {
+                    return borrowed + reservationRS.getInt(1);
+                }
+            }
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+
+        return 0;
+    }
+
+    // LIBRARY CARD
+
+    static void showLibraryCard() {
+
+        User user = users.get(currentUser);
+
+        System.out.println("\n________________________________________________");
+        System.out.println("              VIRTUAL LIBRARY CARD");
+        System.out.println("================================================");
+        System.out.println("PUP ACADLIB");
+        System.out.println("Polytechnic University of the Philippines");
+        System.out.println("------------------------------------------------");
+        System.out.println("Name:        " + user.name);
+        System.out.println("Type:        " + user.category);
+        System.out.println("ID Number:   " + user.idNumber);
+        System.out.println("Status:      Active");
+
+        String sql = "SELECT card_number, status FROM LibraryCards WHERE user_id = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, currentUserId);
+
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                System.out.println("Card Number: " + rs.getString("card_number"));
+                System.out.println("Card Status: " + rs.getString("status"));
+            } else {
+                System.out.println("Card Number: Not assigned");
+            }
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+
+        System.out.println("------------------------------------------------");
+        System.out.println("================================================");
+    }
+
+    // TRANSACTIONS
+
+    static void transactions() {
+
+        int choice;
+
+        do {
+            System.out.println("\n--------------- TRANSACTIONS ---------------");
+            System.out.println("1. Borrowed Books");
+            System.out.println("2. Reservations");
+            System.out.println("3. Return a Book");
+            System.out.println("4. Transaction Count");
+            System.out.println("5. Back");
+
+            choice = getInteger("Enter your choice: ");
+
+            switch (choice) {
+                case 1:
+                    showBorrowedBooks();
+                    break;
+                case 2:
+                    showReservations();
+                    break;
+                case 3:
+                    returnBook();
+                    break;
+                case 4:
+                    System.out.println("\nTotal Transactions: " + getTotalTransactions());
+                    break;
+                case 5:
+                    break;
+                default:
+                    System.out.println("\nInvalid choice.");
+            }
+
+        } while (choice != 5);
+    }
+
+    static void showBorrowedBooks() {
+
+        loadBorrowedBooks();
+
+        System.out.println("\n--------------- BORROWED BOOKS ---------------");
+
+        if (borrowedBooks.isEmpty()) {
+            System.out.println("You currently have no borrowed books.");
+            return;
+        }
+
+        for (Book book : borrowedBooks) {
+            System.out.println("\nBook ID: " + book.id);
+            System.out.println("Title: " + book.title);
+            System.out.println("Author: " + book.author);
+            System.out.println("Status: Borrowed");
+        }
+    }
+
+    static void showReservations() {
+
+        loadReservations();
+
+        System.out.println("\n--------------- RESERVATIONS ---------------");
+
+        boolean found = false;
+
+        for (Reservation reservation : reservations) {
+
+            if (reservation.userId == currentUserId) {
+
+                System.out.println("\nBook: " + reservation.book.title);
+                System.out.println("Date: " + reservation.date);
+                System.out.println("Time: " + reservation.time);
+                System.out.println("Status: " + reservation.status);
+
+                found = true;
+            }
+        }
+
+        if (!found) {
+            System.out.println("You currently have no reservations.");
+        }
+    }
+
+    // RETURN BOOK
+
+    static void returnBook() {
+
+        loadBorrowedBooks();
+
+        System.out.println("\n--------------- RETURN BOOK ---------------");
+
+        if (borrowedBooks.isEmpty()) {
+            System.out.println("You currently have no borrowed books.");
+            return;
+        }
+
+        System.out.println("\nYour borrowed books:");
+
+        for (Book book : borrowedBooks) {
+            System.out.println(book.id + ". " + book.title + " - " + book.author);
+        }
+
+        int id = getInteger("\nEnter Book ID to return: ");
+
+        Book bookToReturn = null;
+
+        for (Book book : borrowedBooks) {
+            if (book.id == id) {
+                bookToReturn = book;
+                break;
+            }
+        }
+
+        if (bookToReturn == null) {
+            System.out.println("\nYou do not have this book borrowed.");
+            return;
+        }
+
+        String updateRecord = "UPDATE BorrowingRecords "
+                            + "SET status = 'Returned', return_date = NOW() "
+                            + "WHERE user_id = ? AND book_id = ? "
+                            + "AND status = 'Borrowed'";
+
+        String updateBook = "UPDATE Books SET available = TRUE WHERE book_id = ?";
+
+        try {
+            conn.setAutoCommit(false);
+
+            try (PreparedStatement recordPS = conn.prepareStatement(updateRecord);
+                 PreparedStatement bookPS = conn.prepareStatement(updateBook)) {
+
+                recordPS.setInt(1, currentUserId);
+                recordPS.setInt(2, id);
+                recordPS.executeUpdate();
+
+                bookPS.setInt(1, id);
+                bookPS.executeUpdate();
+
+                conn.commit();
+
+                recordUserActivity("Returned book: " + bookToReturn.title);
+
+                System.out.println("\nBook returned successfully!");
+                System.out.println("Book: " + bookToReturn.title);
+
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Return failed: " + e.getMessage());
+
+            } finally {
+                conn.setAutoCommit(true);
+            }
+
+        } catch (SQLException e) {
+            System.out.println(e.getMessage());
+        }
+    }
+
+    
+
+    static void libraryGuidelines() {
+
+        System.out.println("\n--------------- LIBRARY GUIDELINES ---------------");
+
+        System.out.println("1. Late return, damaged, and lost books may result in a penalty of PHP 100+ depending on the book.");
+        System.out.println("2. Users are responsible for borrowed materials.");
+        System.out.println("3. Students may borrow a maximum of 3 books.");
+        System.out.println("4. Books may be reserved using a preferred date and time.");
+        System.out.println("5. Reservations are only allowed until 5:00 PM.");
+        System.out.println("6. A book with an active reservation is unavailable for another reservation.");
+        System.out.println("7. Late returns may result in penalties.");
+        System.out.println("8. Students should present their virtual library card.");
+        System.out.println("9. Borrowing, returning, and reservation activities are recorded.");
+    }
+
+    
+
+    static Book findBook(int id) {
+
+        for (Book book : books) {
+            if (book.id == id) return book;
+        }
+
+        return null;
+    }
+
+    
+
+    static int getInteger(String message) {
+
+        while (true) {
+
+            System.out.print(message);
+            String input = scanner.nextLine();
+
+            try {
+                return Integer.parseInt(input);
+
+            } catch (NumberFormatException e) {
+                System.out.println("Please enter a valid number.");
+            }
+        }
+    }
+}
