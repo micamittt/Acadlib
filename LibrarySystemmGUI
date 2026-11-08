@@ -1,0 +1,1153 @@
+package com.mycompany.librarysystemm;
+
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+
+public class LibrarySystemmGUI extends JFrame {
+
+    private static final Color MAROON = new Color(128, 0, 0);
+    private static final Color BG = new Color(246, 247, 249);
+    private static final Color WHITE = Color.WHITE;
+    private static final Color TEXT = new Color(45, 45, 45);
+
+    private JPanel content;
+    private JLabel heading;
+    private JTable table;
+
+    public LibrarySystemmGUI() {
+        setTitle("PUP AcadLib | Library Management System");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(1180, 740);
+        setMinimumSize(new Dimension(900, 600));
+        setLocationRelativeTo(null);
+        showLogin();
+    }
+
+    public static void main(String[] args) {
+        LibrarySystemm.conn = LibrarySystemm.connectDB();
+
+        if (LibrarySystemm.conn == null) {
+            JOptionPane.showMessageDialog(
+                null,
+                "Database connection failed. Check your MySQL connection.",
+                "Database Error",
+                JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        LibrarySystemm.initializeBooks();
+        LibrarySystemm.refreshData();
+
+        SwingUtilities.invokeLater(() ->
+            new LibrarySystemmGUI().setVisible(true)
+        );
+    }
+
+    private void showLogin() {
+        JPanel background = new JPanel(new GridBagLayout());
+        background.setBackground(BG);
+
+        JPanel card = new JPanel(new GridBagLayout());
+        card.setBackground(WHITE);
+        card.setBorder(new EmptyBorder(35, 45, 35, 45));
+        card.setPreferredSize(new Dimension(440, 490));
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.weightx = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.insets = new Insets(7, 0, 7, 0);
+
+        JLabel title = new JLabel("PUP ACADLIB", SwingConstants.CENTER);
+        title.setFont(new Font("Arial", Font.BOLD, 30));
+        title.setForeground(MAROON);
+        c.gridy = 0;
+        card.add(title, c);
+
+        JLabel subtitle = new JLabel(
+            "LIBRARY MANAGEMENT SYSTEM", SwingConstants.CENTER
+        );
+        subtitle.setForeground(Color.GRAY);
+        c.gridy++;
+        card.add(subtitle, c);
+
+        c.gridy++;
+        card.add(new JLabel("Email"), c);
+
+        c.gridy++;
+        JTextField email = new JTextField();
+        email.setPreferredSize(new Dimension(320, 38));
+        card.add(email, c);
+
+        c.gridy++;
+        card.add(new JLabel("Password"), c);
+
+        c.gridy++;
+        JPasswordField password = new JPasswordField();
+        password.setPreferredSize(new Dimension(320, 38));
+        card.add(password, c);
+
+        c.gridy++;
+        card.add(new JLabel("Account Type"), c);
+
+        c.gridy++;
+        JComboBox<String> category =
+            new JComboBox<>(new String[]{"student", "admin"});
+        card.add(category, c);
+
+        c.gridy++;
+        JButton signIn = primaryButton("SIGN IN");
+        card.add(signIn, c);
+
+        c.gridy++;
+        JButton register = secondaryButton("Create an account");
+        card.add(register, c);
+
+        signIn.addActionListener(e -> {
+            String em = email.getText().trim();
+            String pass = new String(password.getPassword());
+            String type = String.valueOf(category.getSelectedItem());
+
+            if (em.isEmpty() || pass.isEmpty()) {
+                error("Please enter your email and password.");
+                return;
+            }
+
+            if (login(em, pass, type)) {
+                showDashboard();
+            } else {
+                error("Incorrect email, password, or account type.");
+            }
+        });
+
+        register.addActionListener(e -> showRegister());
+
+        background.add(card);
+        setContentPane(background);
+        revalidate();
+        repaint();
+    }
+
+    private boolean login(String email, String password, String category) {
+        String sql = "SELECT user_id FROM Users "
+                   + "WHERE email = ? AND password = ? AND category = ?";
+
+        try (PreparedStatement ps =
+                 LibrarySystemm.conn.prepareStatement(sql)) {
+
+            ps.setString(1, email);
+            ps.setString(2, password);
+            ps.setString(3, category);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return false;
+
+                LibrarySystemm.currentUserId = rs.getInt("user_id");
+                LibrarySystemm.refreshData();
+
+                LibrarySystemm.currentUser = -1;
+
+                for (int i = 0; i < LibrarySystemm.users.size(); i++) {
+                    if (LibrarySystemm.users.get(i).id
+                            == LibrarySystemm.currentUserId) {
+                        LibrarySystemm.currentUser = i;
+                        break;
+                    }
+                }
+
+                if (LibrarySystemm.currentUser == -1) {
+                    return false;
+                }
+
+                LibrarySystemm.recordUserActivity("Signed in");
+                return true;
+            }
+
+        } catch (SQLException ex) {
+            error("Login error: " + ex.getMessage());
+            return false;
+        }
+    }
+
+    private void showRegister() {
+        JTextField name = new JTextField();
+        JTextField id = new JTextField();
+        JTextField age = new JTextField();
+        JTextField program = new JTextField();
+        JTextField email = new JTextField();
+        JPasswordField password = new JPasswordField();
+
+        JPanel form = new JPanel(new GridLayout(6, 2, 9, 9));
+
+        form.add(new JLabel("Name:"));
+        form.add(name);
+        form.add(new JLabel("ID Number:"));
+        form.add(id);
+        form.add(new JLabel("Age:"));
+        form.add(age);
+        form.add(new JLabel("Program and Year:"));
+        form.add(program);
+        form.add(new JLabel("Email:"));
+        form.add(email);
+        form.add(new JLabel("Password:"));
+        form.add(password);
+
+        int result = JOptionPane.showConfirmDialog(
+            this, form, "Register Student Account",
+            JOptionPane.OK_CANCEL_OPTION
+        );
+
+        if (result != JOptionPane.OK_OPTION) return;
+
+        try {
+            if (name.getText().trim().isEmpty()
+                    || id.getText().trim().isEmpty()
+                    || age.getText().trim().isEmpty()
+                    || program.getText().trim().isEmpty()
+                    || email.getText().trim().isEmpty()
+                    || password.getPassword().length == 0) {
+                error("Please complete all fields.");
+                return;
+            }
+
+            int userAge = Integer.parseInt(age.getText().trim());
+
+            if (userAge <= 0) {
+                error("Enter a valid age.");
+                return;
+            }
+
+            String sql = "INSERT INTO Users "
+                + "(category, name, id_number, age, program_year, email, password) "
+                + "VALUES ('student', ?, ?, ?, ?, ?, ?)";
+
+            try (PreparedStatement ps =
+                LibrarySystemm.conn.prepareStatement(
+                    sql, Statement.RETURN_GENERATED_KEYS)) {
+
+                ps.setString(1, name.getText().trim());
+                ps.setString(2, id.getText().trim());
+                ps.setInt(3, userAge);
+                ps.setString(4, program.getText().trim());
+                ps.setString(5, email.getText().trim());
+                ps.setString(6, new String(password.getPassword()));
+
+                ps.executeUpdate();
+
+                try (ResultSet keys = ps.getGeneratedKeys()) {
+                    if (keys.next()) {
+                        int userId = keys.getInt(1);
+
+                        String cardSQL =
+                            "INSERT INTO LibraryCards (user_id, card_number) "
+                            + "VALUES (?, ?)";
+
+                        try (PreparedStatement cardPS =
+                            LibrarySystemm.conn.prepareStatement(cardSQL)) {
+
+                            cardPS.setInt(1, userId);
+                            cardPS.setString(
+                                2, "LIB-" + userId + "-" + id.getText().trim()
+                            );
+                            cardPS.executeUpdate();
+                        }
+                    }
+                }
+
+                message("Registration successful!");
+            }
+
+        } catch (NumberFormatException ex) {
+            error("Age must be a number.");
+        } catch (SQLException ex) {
+            error("Registration failed: " + ex.getMessage());
+        }
+    }
+
+    private void showDashboard() {
+        LibrarySystemm.User user = activeUser();
+
+        if (user == null) {
+            error("Unable to load your account.");
+            showLogin();
+            return;
+        }
+
+        JPanel shell = new JPanel(new BorderLayout());
+        shell.setBackground(BG);
+
+        JPanel top = new JPanel(new BorderLayout());
+        top.setBackground(WHITE);
+        top.setBorder(new EmptyBorder(16, 24, 16, 24));
+
+        JLabel brand = new JLabel("PUP ACADLIB");
+        brand.setForeground(MAROON);
+        brand.setFont(new Font("Arial", Font.BOLD, 22));
+
+        JLabel welcome = new JLabel("Welcome, " + user.name);
+        top.add(brand, BorderLayout.WEST);
+        top.add(welcome, BorderLayout.EAST);
+        shell.add(top, BorderLayout.NORTH);
+
+        JPanel sidebar = new JPanel();
+        sidebar.setBackground(MAROON);
+        sidebar.setPreferredSize(new Dimension(220, 0));
+        sidebar.setBorder(new EmptyBorder(20, 12, 20, 12));
+        sidebar.setLayout(new BoxLayout(sidebar, BoxLayout.Y_AXIS));
+
+        content = new JPanel(new BorderLayout(0, 16));
+        content.setBackground(BG);
+        content.setBorder(new EmptyBorder(25, 25, 25, 25));
+
+        heading = new JLabel("Dashboard");
+        heading.setFont(new Font("Arial", Font.BOLD, 25));
+        heading.setForeground(TEXT);
+
+        nav(sidebar, "Dashboard", this::showHome);
+        nav(sidebar, "Library Guidelines", this::showGuidelines);
+        nav(sidebar, "Books", this::showBooks);
+        nav(sidebar, "Scholarly Works", this::showScholarly);
+        nav(sidebar, "Capstone", this::showCapstone);
+
+        if (isAdmin()) {
+            nav(sidebar, "Manage Books", this::showBooks);
+            nav(sidebar, "User Activity Logs", this::showLogs);
+            nav(sidebar, "All Users", this::showUsers);
+        } else {
+            nav(sidebar, "My Library Records", this::showRecords);
+            nav(sidebar, "Reservations", this::showMyReservations);
+            nav(sidebar, "Transactions", this::showTransactions);
+            nav(sidebar, "Virtual Library Card", this::showLibraryCard);
+        }
+
+        sidebar.add(Box.createVerticalGlue());
+        nav(sidebar, "Log Out", this::logout);
+
+        shell.add(sidebar, BorderLayout.WEST);
+        shell.add(content, BorderLayout.CENTER);
+
+        setContentPane(shell);
+        showHome();
+        revalidate();
+        repaint();
+    }
+
+    private void nav(JPanel sidebar, String label, Runnable action) {
+        JButton b = new JButton(label);
+        b.setAlignmentX(Component.LEFT_ALIGNMENT);
+        b.setMaximumSize(new Dimension(Integer.MAX_VALUE, 43));
+        b.setHorizontalAlignment(SwingConstants.LEFT);
+        b.setForeground(WHITE);
+        b.setBackground(MAROON);
+        b.setFont(new Font("Arial", Font.BOLD, 13));
+        b.setBorder(new EmptyBorder(11, 13, 11, 8));
+        b.setFocusPainted(false);
+        b.addActionListener(e -> action.run());
+        sidebar.add(b);
+        sidebar.add(Box.createVerticalStrut(5));
+    }
+
+    private void page(String title, JComponent component) {
+        heading.setText(title);
+        content.removeAll();
+        content.add(heading, BorderLayout.NORTH);
+        content.add(component, BorderLayout.CENTER);
+        content.revalidate();
+        content.repaint();
+    }
+
+    private void showHome() {
+        LibrarySystemm.refreshData();
+
+        JPanel panel = new JPanel(new GridLayout(1, 3, 15, 15));
+        panel.setOpaque(false);
+
+        panel.add(stat("Total Books",
+            String.valueOf(LibrarySystemm.books.size())));
+        panel.add(stat("My Borrowed Books",
+            String.valueOf(LibrarySystemm.borrowedBooks.size())));
+        panel.add(stat("My Active Reservations",
+            String.valueOf(LibrarySystemm.countUserReservations())));
+
+        page("Dashboard", panel);
+    }
+
+    private JPanel stat(String label, String value) {
+        JPanel p = new JPanel(new BorderLayout(5, 12));
+        p.setBackground(WHITE);
+        p.setBorder(new EmptyBorder(22, 20, 22, 20));
+
+        JLabel l = new JLabel(label);
+        l.setForeground(Color.GRAY);
+
+        JLabel v = new JLabel(value);
+        v.setForeground(MAROON);
+        v.setFont(new Font("Arial", Font.BOLD, 30));
+
+        p.add(l, BorderLayout.NORTH);
+        p.add(v, BorderLayout.CENTER);
+        return p;
+    }
+
+    private void showGuidelines() {
+        JTextArea text = new JTextArea(
+            "PUP ACADLIB - LIBRARY GUIDELINES\n\n"
+            + "1. Handle all library materials with care.\n"
+            + "2. Return borrowed books on time.\n"
+            + "3. Students may borrow up to three books at a time.\n"
+            + "4. A book cannot be borrowed while reserved or unavailable.\n"
+            + "5. Reservations are accepted until 5:00 PM.\n"
+            + "6. Keep your library account information updated.\n"
+            + "7. Respect library staff and other library users."
+        );
+
+        text.setEditable(false);
+        text.setFont(new Font("Arial", Font.PLAIN, 15));
+        text.setBorder(new EmptyBorder(20, 20, 20, 20));
+
+        page("Library Guidelines", new JScrollPane(text));
+    }
+
+    // BOOKS
+
+    private void showBooks() {
+        LibrarySystemm.refreshData();
+
+        DefaultTableModel m = model(
+            new String[]{"Book ID", "Title", "Category", "Author", "Status"}
+        );
+
+        for (LibrarySystemm.Book b : LibrarySystemm.books) {
+            m.addRow(new Object[]{
+                b.id, b.title, b.category, b.author,
+                LibrarySystemm.getBookStatus(b)
+            });
+        }
+
+        table = makeTable(m);
+        JPanel panel = tablePanel(table);
+        addBookActions(panel);
+
+        page("Library Books", panel);
+    }
+
+    // SCHOLARLY WORKS
+
+    private void showScholarly() {
+        LibrarySystemm.refreshData();
+
+        DefaultTableModel m = model(
+            new String[]{"Book ID", "Title", "Category", "Author", "Status"}
+        );
+
+        for (LibrarySystemm.Book b : LibrarySystemm.books) {
+            if (b.category.equalsIgnoreCase("Scholarly")
+                    || b.category.equalsIgnoreCase("Research")) {
+
+                m.addRow(new Object[]{
+                    b.id, b.title, b.category, b.author,
+                    LibrarySystemm.getBookStatus(b)
+                });
+            }
+        }
+
+        table = makeTable(m);
+        JPanel panel = tablePanel(table);
+        addBookActions(panel);
+
+        page("Scholarly Works", panel);
+    }
+
+    // CAPSTONE
+
+    private void showCapstone() {
+        LibrarySystemm.refreshData();
+
+        DefaultTableModel m = model(
+            new String[]{"Book ID", "Title", "Category", "Author", "Status"}
+        );
+
+        for (LibrarySystemm.Book b : LibrarySystemm.books) {
+            if (b.category.equalsIgnoreCase("Capstone")) {
+                m.addRow(new Object[]{
+                    b.id, b.title, b.category, b.author,
+                    LibrarySystemm.getBookStatus(b)
+                });
+            }
+        }
+
+        table = makeTable(m);
+        JPanel panel = tablePanel(table);
+        addBookActions(panel);
+
+        page("Capstone", panel);
+    }
+
+    // SHARED BOOK ACTIONS
+
+    private void addBookActions(JPanel panel) {
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        actions.setOpaque(false);
+
+        JButton refresh = secondaryButton("Refresh");
+        actions.add(refresh);
+        refresh.addActionListener(e -> refreshCurrentBookPage());
+
+        if (isAdmin()) {
+            JButton edit = primaryButton("Edit Selected");
+            JButton remove = secondaryButton("Remove Selected");
+
+            actions.add(edit);
+            actions.add(remove);
+
+            edit.addActionListener(e -> editSelectedBook());
+            remove.addActionListener(e -> removeSelectedBook());
+
+        } else {
+            JButton borrow = primaryButton("Borrow Selected");
+            JButton reserve = secondaryButton("Reserve Selected");
+
+            actions.add(borrow);
+            actions.add(reserve);
+
+            borrow.addActionListener(e -> borrowSelectedBook());
+            reserve.addActionListener(e -> reserveSelectedBook());
+        }
+
+        panel.add(actions, BorderLayout.SOUTH);
+    }
+
+    private void refreshCurrentBookPage() {
+        String title = heading.getText();
+
+        if (title.equals("Scholarly Works")) {
+            showScholarly();
+        } else if (title.equals("Capstone")) {
+            showCapstone();
+        } else {
+            showBooks();
+        }
+    }
+
+    private LibrarySystemm.Book selectedBook() {
+        if (table == null || table.getSelectedRow() < 0) {
+            error("Please select a book first.");
+            return null;
+        }
+
+        int row = table.convertRowIndexToModel(table.getSelectedRow());
+
+        int id = Integer.parseInt(
+            String.valueOf(table.getModel().getValueAt(row, 0))
+        );
+
+        LibrarySystemm.refreshData();
+
+        return LibrarySystemm.findBook(id);
+    }
+
+    private void borrowSelectedBook() {
+        LibrarySystemm.Book b = selectedBook();
+        if (b == null) return;
+
+        if (!activeUser().category.equalsIgnoreCase("student")) {
+            error("Only student accounts can borrow books.");
+            return;
+        }
+
+        if (LibrarySystemm.borrowForGUI(b.id)) {
+            message("Book borrowed successfully!");
+        } else {
+            error("Borrowing failed. Check book availability and your borrowing limit.");
+        }
+
+        refreshCurrentBookPage();
+    }
+
+    // RESERVATION
+
+    private void reserveSelectedBook() {
+        LibrarySystemm.Book b = selectedBook();
+        if (b == null) return;
+
+        if (!activeUser().category.equalsIgnoreCase("student")) {
+            error("Only student accounts can reserve books.");
+            return;
+        }
+
+        JTextField dateField = new JTextField(
+            LocalDate.now().toString()
+        );
+
+        JTextField timeField = new JTextField("04:00 PM");
+
+        JPanel form = new JPanel(new GridLayout(2, 2, 8, 8));
+
+        form.add(new JLabel("Reservation Date (YYYY-MM-DD):"));
+        form.add(dateField);
+
+        form.add(new JLabel("Reservation Time (HH:MM AM/PM):"));
+        form.add(timeField);
+
+        int result = JOptionPane.showConfirmDialog(
+            this,
+            form,
+            "Reserve: " + b.title,
+            JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.PLAIN_MESSAGE
+        );
+
+        if (result != JOptionPane.OK_OPTION) return;
+
+        try {
+            LocalDate date = LocalDate.parse(dateField.getText().trim());
+
+            String enteredTime = timeField.getText().trim();
+            LocalTime time;
+
+            try {
+                time = LocalTime.parse(
+                    enteredTime,
+                    DateTimeFormatter.ofPattern("h:mm a")
+                );
+            } catch (DateTimeParseException ex) {
+                time = LocalTime.parse(enteredTime);
+            }
+
+            if (date.isBefore(LocalDate.now())) {
+                error("Reservation date cannot be in the past.");
+                return;
+            }
+
+            if (time.isAfter(LocalTime.of(17, 0))) {
+                error("Reservations must be scheduled no later than 5:00 PM.");
+                return;
+            }
+
+            if (date.equals(LocalDate.now())
+                    && time.isBefore(LocalTime.now())) {
+                error("Please choose a future reservation time.");
+                return;
+            }
+
+            String checkSQL =
+                "SELECT reservation_id FROM Reservations "
+                + "WHERE user_id = ? AND book_id = ? AND status = 'Active'";
+
+            try (PreparedStatement check =
+                     LibrarySystemm.conn.prepareStatement(checkSQL)) {
+
+                check.setInt(1, LibrarySystemm.currentUserId);
+                check.setInt(2, b.id);
+
+                try (ResultSet rs = check.executeQuery()) {
+                    if (rs.next()) {
+                        error("You already have an active reservation for this book.");
+                        return;
+                    }
+                }
+            }
+
+            String sql =
+                "INSERT INTO Reservations "
+                + "(user_id, book_id, reservation_date, reservation_time, status) "
+                + "VALUES (?, ?, ?, ?, 'Active')";
+
+            try (PreparedStatement ps =
+                     LibrarySystemm.conn.prepareStatement(sql)) {
+
+                ps.setInt(1, LibrarySystemm.currentUserId);
+                ps.setInt(2, b.id);
+                ps.setDate(3, Date.valueOf(date));
+                ps.setTime(4, Time.valueOf(time));
+
+                ps.executeUpdate();
+            }
+
+            LibrarySystemm.recordUserActivity(
+                "Reserved book: " + b.title
+            );
+
+            LibrarySystemm.refreshData();
+
+            message("Reservation successful!\n\n"
+                + "Book: " + b.title
+                + "\nDate: " + date
+                + "\nTime: " + time);
+
+            refreshCurrentBookPage();
+
+        } catch (DateTimeParseException ex) {
+            error("Invalid date or time. Please use YYYY-MM-DD and 04:00 PM.");
+        } catch (SQLException ex) {
+            error("Reservation failed: " + ex.getMessage());
+        }
+    }
+
+    // ADMIN BOOK MANAGEMENT
+
+    private void editSelectedBook() {
+        LibrarySystemm.Book b = selectedBook();
+        if (b == null) return;
+
+        JTextField title = new JTextField(b.title);
+        JTextField author = new JTextField(b.author);
+
+        JComboBox<String> category = new JComboBox<>(
+            new String[]{"Scholarly", "Research", "Capstone"}
+        );
+
+        category.setSelectedItem(b.category);
+
+        JPanel form = new JPanel(new GridLayout(3, 2, 8, 8));
+
+        form.add(new JLabel("Title:"));
+        form.add(title);
+
+        form.add(new JLabel("Author:"));
+        form.add(author);
+
+        form.add(new JLabel("Category:"));
+        form.add(category);
+
+        int result = JOptionPane.showConfirmDialog(
+            this, form, "Edit Book",
+            JOptionPane.OK_CANCEL_OPTION
+        );
+
+        if (result != JOptionPane.OK_OPTION) return;
+
+        if (title.getText().trim().isEmpty()
+                || author.getText().trim().isEmpty()) {
+            error("Title and author cannot be blank.");
+            return;
+        }
+
+        String sql =
+            "UPDATE Books SET title = ?, author = ?, category = ? "
+            + "WHERE book_id = ?";
+
+        try (PreparedStatement ps =
+                 LibrarySystemm.conn.prepareStatement(sql)) {
+
+            ps.setString(1, title.getText().trim());
+            ps.setString(2, author.getText().trim());
+            ps.setString(3, String.valueOf(category.getSelectedItem()));
+            ps.setInt(4, b.id);
+
+            ps.executeUpdate();
+
+            LibrarySystemm.recordUserActivity("Edited book: " + b.title);
+            LibrarySystemm.refreshData();
+
+            message("Book updated successfully.");
+            refreshCurrentBookPage();
+
+        } catch (SQLException ex) {
+            error("Edit failed: " + ex.getMessage());
+        }
+    }
+
+    private void removeSelectedBook() {
+        LibrarySystemm.Book b = selectedBook();
+        if (b == null) return;
+
+        if (!b.available || LibrarySystemm.hasActiveReservation(b)) {
+            error("This book is borrowed or reserved and cannot be removed.");
+            return;
+        }
+
+        int confirm = JOptionPane.showConfirmDialog(
+            this,
+            "Remove " + b.title + "?",
+            "Confirm Removal",
+            JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        try (PreparedStatement ps =
+                 LibrarySystemm.conn.prepareStatement(
+                     "DELETE FROM Books WHERE book_id = ?")) {
+
+            ps.setInt(1, b.id);
+
+            if (ps.executeUpdate() > 0) {
+                LibrarySystemm.recordUserActivity(
+                    "Removed book: " + b.title
+                );
+
+                LibrarySystemm.refreshData();
+                message("Book removed successfully.");
+            }
+
+            refreshCurrentBookPage();
+
+        } catch (SQLException ex) {
+            error("Remove failed: " + ex.getMessage());
+        }
+    }
+
+    // STUDENT RESERVATIONS
+
+    private void showMyReservations() {
+        LibrarySystemm.loadReservations();
+
+        DefaultTableModel m = model(
+            new String[]{"Book ID", "Title", "Date", "Time", "Status"}
+        );
+
+        for (LibrarySystemm.Reservation r : LibrarySystemm.reservations) {
+            if (r.userId == LibrarySystemm.currentUserId) {
+                m.addRow(new Object[]{
+                    r.book.id, r.book.title, r.date, r.time, r.status
+                });
+            }
+        }
+
+        page("My Reservations", tablePanel(makeTable(m)));
+    }
+
+    // STUDENT RECORDS
+
+    private void showRecords() {
+        LibrarySystemm.refreshData();
+
+        LibrarySystemm.User u = activeUser();
+
+        DefaultTableModel m = model(
+            new String[]{"Information", "Details"}
+        );
+
+        m.addRow(new Object[]{"Name", u.name});
+        m.addRow(new Object[]{"ID Number", u.idNumber});
+        m.addRow(new Object[]{"Age", u.age});
+        m.addRow(new Object[]{"Program and Year", u.programYear});
+        m.addRow(new Object[]{"Email", u.email});
+        m.addRow(new Object[]{"Account Type", u.category});
+        m.addRow(new Object[]{"Books Borrowed",
+            LibrarySystemm.borrowedBooks.size()});
+        m.addRow(new Object[]{"Active Reservations",
+            LibrarySystemm.countUserReservations()});
+
+        page("My Library Records", tablePanel(makeTable(m)));
+    }
+
+    // RETURN BOOK
+
+    private void showTransactions() {
+        LibrarySystemm.loadBorrowedBooks();
+
+        DefaultTableModel m = model(
+            new String[]{"Book ID", "Title", "Author", "Status"}
+        );
+
+        for (LibrarySystemm.Book b : LibrarySystemm.borrowedBooks) {
+            m.addRow(new Object[]{
+                b.id, b.title, b.author, "Borrowed"
+            });
+        }
+
+        table = makeTable(m);
+
+        JPanel panel = tablePanel(table);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        actions.setOpaque(false);
+
+        JButton returnButton = primaryButton("Return Selected Book");
+        actions.add(returnButton);
+
+        panel.add(actions, BorderLayout.SOUTH);
+
+        returnButton.addActionListener(e -> returnSelectedBook());
+
+        page("Transactions - Borrowed Books", panel);
+    }
+
+    private void returnSelectedBook() {
+        if (table == null || table.getSelectedRow() < 0) {
+            error("Please select a borrowed book first.");
+            return;
+        }
+
+        int row = table.convertRowIndexToModel(table.getSelectedRow());
+
+        int bookId = Integer.parseInt(
+            String.valueOf(table.getModel().getValueAt(row, 0))
+        );
+
+        int userId = LibrarySystemm.currentUserId;
+
+        int confirm = JOptionPane.showConfirmDialog(
+            this,
+            "Are you sure you want to return this book?",
+            "Confirm Return",
+            JOptionPane.YES_NO_OPTION
+        );
+
+        if (confirm != JOptionPane.YES_OPTION) return;
+
+        Connection conn = LibrarySystemm.conn;
+
+        try {
+            conn.setAutoCommit(false);
+
+            String updateBorrowing =
+                "UPDATE BorrowingRecords "
+                + "SET status = 'Returned', return_date = NOW() "
+                + "WHERE user_id = ? AND book_id = ? "
+                + "AND status = 'Borrowed' AND return_date IS NULL";
+
+            int updated;
+
+            try (PreparedStatement ps =
+                     conn.prepareStatement(updateBorrowing)) {
+
+                ps.setInt(1, userId);
+                ps.setInt(2, bookId);
+
+                updated = ps.executeUpdate();
+            }
+
+            if (updated == 0) {
+                conn.rollback();
+                error("No active borrowing record was found.");
+                return;
+            }
+
+            String updateBook =
+                "UPDATE Books SET available = TRUE WHERE book_id = ?";
+
+            try (PreparedStatement ps =
+                     conn.prepareStatement(updateBook)) {
+
+                ps.setInt(1, bookId);
+                ps.executeUpdate();
+            }
+
+            conn.commit();
+
+            LibrarySystemm.recordUserActivity(
+                "Returned book ID: " + bookId
+            );
+
+            LibrarySystemm.refreshData();
+
+            message("Book returned successfully!");
+            showTransactions();
+
+        } catch (SQLException ex) {
+            try {
+                conn.rollback();
+            } catch (SQLException rollbackError) {
+                ex.addSuppressed(rollbackError);
+            }
+
+            error("Return failed: " + ex.getMessage());
+
+        } finally {
+            try {
+                conn.setAutoCommit(true);
+            } catch (SQLException ex) {
+                error("Database connection error: " + ex.getMessage());
+            }
+        }
+    }
+
+    // VIRTUAL LIBRARY CARD
+
+    private void showLibraryCard() {
+        LibrarySystemm.User u = activeUser();
+
+        DefaultTableModel m = model(
+            new String[]{"Card Information", "Details"}
+        );
+
+        String sql =
+            "SELECT card_number, status FROM LibraryCards WHERE user_id = ?";
+
+        try (PreparedStatement ps =
+                 LibrarySystemm.conn.prepareStatement(sql)) {
+
+            ps.setInt(1, LibrarySystemm.currentUserId);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    m.addRow(new Object[]{"University", "PUP"});
+                    m.addRow(new Object[]{"Name", u.name});
+                    m.addRow(new Object[]{"ID Number", u.idNumber});
+                    m.addRow(new Object[]{"Card Number",
+                        rs.getString("card_number")});
+                    m.addRow(new Object[]{"Status",
+                        rs.getString("status")});
+                }
+            }
+
+        } catch (SQLException ex) {
+            error("Could not load library card: " + ex.getMessage());
+        }
+
+        page("Virtual Library Card", tablePanel(makeTable(m)));
+    }
+
+    // ADMIN LOGS
+
+    private void showLogs() {
+        DefaultTableModel m = model(
+            new String[]{"Name", "ID Number", "Account", "Activity", "Date"}
+        );
+
+        String sql =
+            "SELECT u.name, u.id_number, u.category, "
+            + "l.activity, l.activity_date "
+            + "FROM UserLogs l JOIN Users u ON l.user_id = u.user_id "
+            + "ORDER BY l.activity_date DESC";
+
+        try (PreparedStatement ps =
+                 LibrarySystemm.conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            while (rs.next()) {
+                m.addRow(new Object[]{
+                    rs.getString("name"),
+                    rs.getString("id_number"),
+                    rs.getString("category"),
+                    rs.getString("activity"),
+                    rs.getString("activity_date")
+                });
+            }
+
+        } catch (SQLException ex) {
+            error("Could not load logs: " + ex.getMessage());
+        }
+
+        page("User Activity Logs", tablePanel(makeTable(m)));
+    }
+
+    // ADMIN USERS
+
+    private void showUsers() {
+        LibrarySystemm.loadUsers();
+
+        DefaultTableModel m = model(
+            new String[]{
+                "Name", "Category", "ID Number",
+                "Age", "Program and Year", "Email"
+            }
+        );
+
+        for (LibrarySystemm.User u : LibrarySystemm.users) {
+            m.addRow(new Object[]{
+                u.name, u.category, u.idNumber,
+                u.age, u.programYear, u.email
+            });
+        }
+
+        page("Registered Users", tablePanel(makeTable(m)));
+    }
+
+    private void logout() {
+        LibrarySystemm.recordUserActivity("Signed out");
+
+        LibrarySystemm.currentUser = -1;
+        LibrarySystemm.currentUserId = -1;
+
+        LibrarySystemm.borrowedBooks.clear();
+        LibrarySystemm.reservations.clear();
+
+        showLogin();
+    }
+
+    // HELPERS
+
+    private LibrarySystemm.User activeUser() {
+        int index = LibrarySystemm.currentUser;
+
+        if (index < 0 || index >= LibrarySystemm.users.size()) {
+            return null;
+        }
+
+        return LibrarySystemm.users.get(index);
+    }
+
+    private boolean isAdmin() {
+        LibrarySystemm.User u = activeUser();
+
+        return u != null
+            && u.category.equalsIgnoreCase("admin");
+    }
+
+    private DefaultTableModel model(String[] columns) {
+        return new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+    }
+
+    private JTable makeTable(DefaultTableModel model) {
+        JTable t = new JTable(model);
+        t.setRowHeight(36);
+        t.setFont(new Font("Arial", Font.PLAIN, 13));
+        t.setSelectionBackground(new Color(245, 225, 225));
+        t.setSelectionForeground(TEXT);
+        t.getTableHeader().setFont(new Font("Arial", Font.BOLD, 13));
+        t.getTableHeader().setBackground(new Color(242, 242, 242));
+        t.getTableHeader().setPreferredSize(new Dimension(0, 38));
+        return t;
+    }
+
+    private JPanel tablePanel(JTable t) {
+        JPanel p = new JPanel(new BorderLayout(0, 12));
+        p.setOpaque(false);
+
+        JPanel card = new JPanel(new BorderLayout());
+        card.setBackground(WHITE);
+        card.setBorder(new EmptyBorder(12, 12, 12, 12));
+        card.add(new JScrollPane(t), BorderLayout.CENTER);
+
+        p.add(card, BorderLayout.CENTER);
+        return p;
+    }
+
+    private JButton primaryButton(String text) {
+        JButton b = new JButton(text);
+        b.setBackground(MAROON);
+        b.setForeground(WHITE);
+        b.setFocusPainted(false);
+        b.setBorder(new EmptyBorder(10, 18, 10, 18));
+        b.setFont(new Font("Arial", Font.BOLD, 12));
+        return b;
+    }
+
+    private JButton secondaryButton(String text) {
+        JButton b = new JButton(text);
+        b.setBackground(new Color(235, 235, 235));
+        b.setForeground(TEXT);
+        b.setFocusPainted(false);
+        b.setBorder(new EmptyBorder(10, 18, 10, 18));
+        return b;
+    }
+
+    private void error(String message) {
+        JOptionPane.showMessageDialog(
+            this, message, "PUP AcadLib", JOptionPane.ERROR_MESSAGE
+        );
+    }
+
+    private void message(String message) {
+        JOptionPane.showMessageDialog(
+            this, message, "PUP AcadLib", JOptionPane.INFORMATION_MESSAGE
+        );
+    }
+}
